@@ -15,10 +15,10 @@ from typing import Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, create_model, field_validator
 
-from fastwings.model import Base
+from fastwings.model import BaseModel as DBBaseModel
 
 SchemaInstance = TypeVar("SchemaInstance", bound=BaseModel)
-ModelInstance = TypeVar("ModelInstance", bound=Base)
+ModelInstance = TypeVar("ModelInstance", bound=DBBaseModel)
 
 
 class BaseRequestSchema(BaseModel):

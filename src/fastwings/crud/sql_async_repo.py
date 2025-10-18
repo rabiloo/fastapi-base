@@ -4,12 +4,14 @@ Provides async methods for create, read, update, and delete operations using SQL
 
 Classes:
     SQLAsyncRepository: Asynchronous CRUD repository for SQLAlchemy models.
+    SoftDeletableAsyncRepository: Async repository supporting soft deletion.
 """
 
 import logging
 from collections.abc import Sequence
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
 
+from pydantic import BaseModel as PydanticBaseModel
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import column
@@ -18,8 +20,8 @@ from fastwings.crud.sql_query_builder import QueryBuilder, SoftDeletableQueryBui
 from fastwings.model import BaseModel
 
 ModelType = TypeVar("ModelType", bound=BaseModel)
-CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
-UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
+CreateSchemaType = TypeVar("CreateSchemaType", bound=PydanticBaseModel)
+UpdateSchemaType = TypeVar("UpdateSchemaType", bound=PydanticBaseModel)
 
 logger = logging.getLogger(__name__)
 
@@ -29,18 +31,19 @@ class SQLAsyncRepository(Generic[ModelType]):
 
     Provides async methods for create, read, update, and delete operations.
 
-    Args:
-        model (Type[ModelType]): SQLAlchemy model class.
+    Attributes:
+        model (type[ModelType]): SQLAlchemy model class.
+        model_id_column (ColumnElement[Any]): Column representing the model's ID.
     """
 
     def __init__(self, model: type[ModelType]):
         """Initializes the repository with a SQLAlchemy model class.
 
         Args:
-            model (Type[ModelType]): SQLAlchemy model class.
+            model (type[ModelType]): SQLAlchemy model class.
         """
         self.model = model
-        self.model_id_column = column(self.model.id)
+        self.model_id_column: ColumnElement[Any] = column(self.model.id)
 
     def query(self) -> QueryBuilder[ModelType]:
         """Creates a new QueryBuilder instance for this repository's model.
@@ -65,7 +68,7 @@ class SQLAsyncRepository(Generic[ModelType]):
             obj_id (Any): Object ID to query.
 
         Returns:
-            Optional[ModelType]: Retrieved model instance or None.
+            ModelType | None: Retrieved model instance or None.
         """
         stmt = select(self.model).where(self.model.id == obj_id)
         result = await session.execute(stmt)
@@ -78,21 +81,22 @@ class SQLAsyncRepository(Generic[ModelType]):
         self,
         session: AsyncSession,
         *,
-        order_by: Sequence[ColumnElement] | None = None,
+        order_by: Sequence[ColumnElement[Any]] | None = None,
         **filters: Any
     ) -> ModelType | None:
         """Retrieve a single object by filter conditions.
 
         Args:
             session (AsyncSession): SQLAlchemy async session.
-            **filters: Filter conditions (e.g., email="user@example.com")
+            order_by (Sequence[ColumnElement[Any]] | None, optional): Columns to order by. Defaults to model ID column.
+            **filters: Filter conditions (e.g., email="user@example.com").
 
         Returns:
-            Optional[ModelType]: Retrieved model instance or None.
+            ModelType | None: Retrieved model instance or None.
         """
         stmt = self.query() \
             .add_filters(**filters) \
-            .order_by(order_by if order_by is not None else self.model_id_column) \
+            .order_by(*(order_by if order_by is not None else [self.model_id_column])) \
             .limit(1) \
             .as_select()
         result = await session.execute(stmt)
@@ -107,15 +111,16 @@ class SQLAsyncRepository(Generic[ModelType]):
         *,
         offset: int = 0,
         limit: int = 100,
-        order_by: Sequence[ColumnElement] | None = None,
+        order_by: Sequence[ColumnElement[Any]] | None = None,
         **filters: Any
     ) -> Sequence[ModelType]:
         """Retrieve multiple objects with optional pagination and filters.
 
         Args:
             session (AsyncSession): SQLAlchemy async session.
-            offset (int): Number of records to skip.
-            limit (int): Maximum number of records to return.
+            offset (int, optional): Number of records to skip. Defaults to 0.
+            limit (int, optional): Maximum number of records to return. Defaults to 100.
+            order_by (Sequence[ColumnElement[Any]] | None, optional): Columns to order by. Defaults to model ID column.
             **filters: Filter conditions.
 
         Returns:
@@ -123,7 +128,7 @@ class SQLAsyncRepository(Generic[ModelType]):
         """
         stmt = self.query() \
             .add_filters(**filters) \
-            .order_by(order_by if order_by is not None else self.model_id_column) \
+            .order_by(*(order_by if order_by is not None else [self.model_id_column])) \
             .offset(offset) \
             .limit(limit) \
             .as_select()
@@ -139,13 +144,14 @@ class SQLAsyncRepository(Generic[ModelType]):
         self,
         session: AsyncSession,
         *,
-        order_by: Sequence[ColumnElement] | None = None,
+        order_by: Sequence[ColumnElement[Any]] | None = None,
         **filters: Any
     ) -> Sequence[ModelType]:
         """Retrieve all objects matching the given filters.
 
         Args:
             session (AsyncSession): SQLAlchemy async session.
+            order_by (Sequence[ColumnElement[Any]] | None, optional): Columns to order by. Defaults to model ID column.
             **filters: Filter conditions.
 
         Returns:
@@ -153,7 +159,7 @@ class SQLAsyncRepository(Generic[ModelType]):
         """
         stmt = self.query() \
             .add_filters(**filters) \
-            .order_by(order_by if order_by is not None else self.model_id_column) \
+            .order_by(*(order_by if order_by is not None else [self.model_id_column])) \
             .as_select()
         result = await session.execute(stmt)
         data = result.scalars().all()
@@ -177,7 +183,7 @@ class SQLAsyncRepository(Generic[ModelType]):
         """
         stmt = self.query().add_filters(**filters).as_count()
         result = await session.execute(stmt)
-        count = result.scalar_one()
+        count = cast(int, result.scalar_one())
 
         logger.debug(f"Count from table {self.model.__tablename__.upper()}: {count}")
         return count
@@ -198,7 +204,7 @@ class SQLAsyncRepository(Generic[ModelType]):
         """
         stmt = self.query().add_filters(**filters).as_exists()
         result = await session.execute(stmt)
-        exists = result.scalar_one()
+        exists = cast(bool, result.scalar_one())
 
         logger.debug(f"Exists check in table {self.model.__tablename__.upper()}: {exists}")
         return exists
@@ -248,7 +254,6 @@ class SQLAsyncRepository(Generic[ModelType]):
             for obj_in in objs_in
         ]
         session.add_all(db_objs)
-
         await session.flush(db_objs)
 
         logger.debug(f"Bulk insert {len(db_objs)} records to table {self.model.__tablename__.upper()} done")
@@ -266,10 +271,13 @@ class SQLAsyncRepository(Generic[ModelType]):
         Args:
             session (AsyncSession): SQLAlchemy async session.
             obj_id (Any): Object ID to update.
-            obj_in (UpdateSchemaType | Dict[str, Any]): Update data.
+            obj_in (UpdateSchemaType | dict[str, Any]): Update data.
 
         Returns:
             ModelType: Updated model instance.
+
+        Raises:
+            ValueError: If the object with the given ID is not found.
         """
         obj = await self.get(session, obj_id)
         if obj is None:
@@ -325,8 +333,8 @@ class SQLAsyncRepository(Generic[ModelType]):
             session (AsyncSession): SQLAlchemy async session.
             obj_id (Any): Object ID to delete.
 
-        Returns:
-            None
+        Raises:
+            ValueError: If the object with the given ID is not found.
         """
         obj = await self.get(session, obj_id)
         if obj is None:
@@ -335,7 +343,7 @@ class SQLAsyncRepository(Generic[ModelType]):
         await session.delete(obj)
         await session.flush()
 
-        logger.debug(f"Delete from table {self.model.__tablename__.upper()} done")
+        logger.debug(f"Delete {obj_id} from table {self.model.__tablename__.upper()} done")
 
     async def delete_multi(
         self,
@@ -366,15 +374,16 @@ class SQLAsyncRepository(Generic[ModelType]):
         *,
         page: int = 1,
         per_page: int = 20,
-        order_by: Sequence[ColumnElement] | None = None,
+        order_by: Sequence[ColumnElement[Any]] | None = None,
         **filters: Any
     ) -> tuple[Sequence[ModelType], int]:
         """Paginate results with total count.
 
         Args:
             session (AsyncSession): SQLAlchemy async session.
-            page (int): Page number (1-indexed).
-            per_page (int): Number of items per page.
+            page (int, optional): Page number (1-indexed). Defaults to 1.
+            per_page (int, optional): Number of items per page. Defaults to 20.
+            order_by (Sequence[ColumnElement[Any]] | None, optional): Columns to order by. Defaults to model ID column.
             **filters: Filter conditions.
 
         Returns:
@@ -383,7 +392,7 @@ class SQLAsyncRepository(Generic[ModelType]):
         # Get paginated items
         items_stmt = self.query() \
             .add_filters(**filters) \
-            .order_by(order_by if order_by is not None else self.model_id_column) \
+            .order_by(*(order_by if order_by is not None else [self.model_id_column])) \
             .paginate(page, per_page) \
             .as_select()
 
@@ -446,20 +455,16 @@ class SQLAsyncRepository(Generic[ModelType]):
 
 
 class SoftDeletableAsyncRepository(SQLAsyncRepository[ModelType]):
-    """Provide utilities method to query data on BaseModel."""
+    """Asynchronous CRUD repository supporting soft deletion.
+
+    Provides utilities for querying and soft-deleting data on BaseModel.
+    """
 
     def query(self) -> SoftDeletableQueryBuilder[ModelType]:
-        """Creates a new QueryBuilder instance for this repository's model.
+        """Creates a new SoftDeletableQueryBuilder instance for this repository's model.
 
         Returns:
-            QueryBuilder[ModelType]: A new query builder instance.
-
-        Example:
-            users = await repo.query() \
-                .add_filters(User.is_active == True) \
-                .order_by(User.created_at.desc()) \
-                .limit(10) \
-                .all(session)
+            SoftDeletableQueryBuilder[ModelType]: A new query builder instance.
         """
         return SoftDeletableQueryBuilder(self.model)
 
@@ -469,24 +474,28 @@ class SoftDeletableAsyncRepository(SQLAsyncRepository[ModelType]):
         *,
         obj_id: Any,
     ) -> None:
-        """Asynchronously delete an object in the database.
+        """Soft-deletes an object in the database.
 
         Args:
             session (AsyncSession): SQLAlchemy async session.
             obj_id (Any): Object ID to delete.
         """
         obj = await self.get(session, obj_id)
+        # Add None check for type safety and to prevent AttributeError
+        if obj is None:
+            raise ValueError(f"Object with id {obj_id} not found.")
+
         obj.soft_delete()
         await session.flush([obj])
 
-        logger.debug(f"Delete from table {self.model.__tablename__.upper()} done")
+        logger.debug(f"Delete {obj_id} from table {self.model.__tablename__.upper()} done")
 
     async def delete_multi(
         self,
         session: AsyncSession,
         **filters: Any
-    ) -> None:
-        """Delete multiple records matching the filters.
+    ) -> int:
+        """Soft-deletes multiple records matching the filters.
 
         Args:
             session (AsyncSession): SQLAlchemy async session.
@@ -495,9 +504,16 @@ class SoftDeletableAsyncRepository(SQLAsyncRepository[ModelType]):
         Returns:
             int: Number of deleted records.
         """
+        # Note: self.get_all() uses self.query(), which is SoftDeletableQueryBuilder,
+        # so this will only fetch non-deleted items by default.
         objs = await self.get_all(session, **filters)
+        if not objs:
+            return 0
+
         for obj in objs:
             obj.soft_delete()
         await session.flush(objs)
 
-        logger.debug(f"Bulk delete records from table {self.model.__tablename__.upper()} done")
+        logger.debug(f"Bulk delete {len(objs)} records from table {self.model.__tablename__.upper()} done")
+
+        return len(objs)
