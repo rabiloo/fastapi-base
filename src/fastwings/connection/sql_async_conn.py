@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, a
 from sqlalchemy.future import select
 
 from fastwings.config import settings
+from fastwings.error_code import ServerErrorCode
 
 
 # Heavily inspired by https://praciano.com.br/fastapi-and-async-sqlalchemy-20-with-pytest-done-right.html
@@ -90,9 +91,10 @@ class SessionManager:
         async with self._sessionmaker() as session:
             try:
                 yield session
-            except Exception:
+                await session.commit()
+            except Exception as ex:
                 await session.rollback()
-                raise
+                raise ServerErrorCode.DATABASE_ERROR.value(ex) from ex
             finally:
                 await session.close()
 

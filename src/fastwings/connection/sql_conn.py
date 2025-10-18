@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from fastwings.config import settings
+from fastwings.error_code import ServerErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +91,10 @@ class SessionManager:
         session = self._sessionmaker()
         try:
             yield session
-        except Exception:
+            session.commit()
+        except Exception as ex:
             session.rollback()
-            raise
+            raise ServerErrorCode.DATABASE_ERROR.value(ex) from ex
         finally:
             session.close()
 
