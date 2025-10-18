@@ -42,7 +42,7 @@ class SQLRepository(Generic[ModelType]):
             model (type[ModelType]): SQLAlchemy model class.
         """
         self.model = model
-        self.model_id_column: ColumnElement[Any] = self.model.id
+        self.model_id_column: ColumnElement[Any] = self.model.id.expression
 
     def query(self) -> QueryBuilder[ModelType]:
         """Creates a new QueryBuilder instance for this repository's model.

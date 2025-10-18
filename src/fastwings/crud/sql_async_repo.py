@@ -14,7 +14,6 @@ from typing import Any, Generic, TypeVar, cast
 from pydantic import BaseModel as PydanticBaseModel
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import column
 
 from fastwings.crud.sql_query_builder import QueryBuilder, SoftDeletableQueryBuilder
 from fastwings.model import BaseModel
@@ -43,7 +42,7 @@ class SQLAsyncRepository(Generic[ModelType]):
             model (type[ModelType]): SQLAlchemy model class.
         """
         self.model = model
-        self.model_id_column: ColumnElement[Any] = column(self.model.id)
+        self.model_id_column: ColumnElement[Any] = self.model.id.expression
 
     def query(self) -> QueryBuilder[ModelType]:
         """Creates a new QueryBuilder instance for this repository's model.

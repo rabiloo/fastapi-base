@@ -9,14 +9,17 @@ Classes:
     SoftDeletableQueryBuilder: Extends QueryBuilder to filter out soft-deleted records.
 """
 
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, Generic, TypeVar, cast, TYPE_CHECKING
 
 from sqlalchemy import Column, Delete, Select, Update, delete, func, inspect, select, update
 from sqlalchemy.sql.expression import ColumnElement
-from sqlalchemy.sql.selectable import ScalarSelect, NamedFromClause
-from typing_extensions import Self
+from sqlalchemy.sql.selectable import NamedFromClause
 
 from fastwings.model import BaseModel
+
+if TYPE_CHECKING:
+    from typing_extensions import Self
+    from sqlalchemy.sql.selectable import ScalarSelect
 
 ModelType = TypeVar("ModelType", bound=BaseModel)
 
@@ -587,6 +590,6 @@ class SoftDeletableQueryBuilder(QueryBuilder[ModelType]):
         stmt = super()._apply_common_clauses(stmt)
         if self._filter_soft_deleted and isinstance(stmt, Select):
             is_deleted_col = cast(ColumnElement[bool], self.model_class.is_deleted)
-            stmt = stmt.where(is_deleted_col == False)
+            stmt = stmt.where(is_deleted_col.is_(False))
 
         return stmt

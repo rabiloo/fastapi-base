@@ -15,7 +15,7 @@ import re
 import uuid
 from collections.abc import Iterable
 from datetime import datetime, timezone
-from typing import Any, ClassVar, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import inflect
 from pydantic import BaseModel as PydanticBaseModel
@@ -29,9 +29,10 @@ from sqlmodel import Field, SQLModel
 from fastwings.error_code import ServerErrorCode
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
-    from sqlalchemy.sql.schema import Column
     from sqlalchemy.engine import Connection
+    from sqlalchemy.sql.schema import Column
+    from typing_extensions import Self
+
 
 # --- Core Model Interface and Lifecycle Events ---
 class IDbModel:
@@ -272,7 +273,13 @@ def validate_class_columns(mapper: Mapper[Any], cls: type[Any]) -> None:
     if not issubclass(cls, IDbModel):
         return
 
-    for c in getattr(cls, "__table__", []).columns if hasattr(getattr(cls, "__table__", None), "columns") else []:
+    # Get the table object safely. If it doesn't exist, table will be None.
+    table = getattr(cls, "__table__", None)
+
+    # Set the iterable to table.columns only if table is valid, otherwise use an empty list.
+    columns_to_check = table.columns if table is not None and hasattr(table, "columns") else []
+
+    for c in columns_to_check:
         if c.primary_key:
             continue
         if c.name in cls.view_only_fields and not c.nullable and not c.server_default and not c.default:
